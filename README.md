@@ -1,5 +1,11 @@
-# unique_temp_pathname_rust
+#### unique_temp_pathname_rust
 
+# Make name only
+```rust
+
+```
+
+# Make file and name 
 ```rust
 
 /// Creates a unique temporary file in the specified base directory with configurable retry logic.
