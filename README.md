@@ -11,7 +11,7 @@
 /// # Project Context
 /// This function generates a temporary file name for scenarios where you need the name
 /// before creating the file (e.g., passing to external tools, database registration).
-/// Use `create_unique_temp_filepathbuf` instead if you need atomic file creation.
+/// Use `create_unique_temp_name_and_file_filepathbuf` instead if you need atomic file creation.
 ///
 /// # Implementation Strategy
 /// - Uses process ID, thread ID, and nanosecond timestamp for uniqueness
@@ -32,8 +32,8 @@
 /// # Security Warning
 /// This function has an inherent race condition. Another process can create the file
 /// between when this function checks and when you use the path. For atomic creation,
-/// use `create_unique_temp_filepathbuf` instead.
-pub fn create_unique_temp_pathname(
+/// use `create_unique_temp_name_and_file_filepathbuf` instead.
+pub fn create_unique_temp_filepath_name_pathbuf(
     base_path: &Path,
     prefix: &str,
     number_of_attempts: u32,
@@ -131,7 +131,7 @@ mod pathname_tests {
     fn test_create_temp_pathname_basic() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_pathname(&temp_dir, "test", 5, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "test", 5, 1);
 
         assert!(result.is_ok(), "Should successfully generate temp pathname");
 
@@ -148,7 +148,7 @@ mod pathname_tests {
 
         // Generate 5 temp pathnames in rapid succession
         for _ in 0..5 {
-            let result = create_unique_temp_pathname(&temp_dir, "multi", 5, 1);
+            let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "multi", 5, 1);
             assert!(result.is_ok(), "Should generate pathname");
             paths.push(result.unwrap());
         }
@@ -171,7 +171,7 @@ mod pathname_tests {
     fn test_pathname_format() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_pathname(&temp_dir, "prefix", 5, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "prefix", 5, 1);
         assert!(result.is_ok(), "Should generate pathname");
 
         let path = result.unwrap();
@@ -192,7 +192,7 @@ mod pathname_tests {
     fn test_zero_attempts_pathname() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_pathname(&temp_dir, "zero", 0, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "zero", 0, 1);
 
         assert!(result.is_err(), "Should fail with zero attempts");
 
@@ -211,7 +211,7 @@ mod pathname_tests {
     fn test_single_attempt_pathname() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_pathname(&temp_dir, "single", 1, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "single", 1, 1);
 
         assert!(result.is_ok(), "Should succeed with single attempt in low contention");
 
@@ -226,11 +226,11 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test with zero delay
-        let result1 = create_unique_temp_pathname(&temp_dir, "delay0", 3, 0);
+        let result1 = create_unique_temp_filepath_name_pathbuf(&temp_dir, "delay0", 3, 0);
         assert!(result1.is_ok(), "Should work with zero delay");
 
         // Test with larger delay
-        let result2 = create_unique_temp_pathname(&temp_dir, "delay100", 3, 100);
+        let result2 = create_unique_temp_filepath_name_pathbuf(&temp_dir, "delay100", 3, 100);
         assert!(result2.is_ok(), "Should work with 100ms delay");
     }
 
@@ -239,7 +239,7 @@ mod pathname_tests {
     fn test_many_attempts_pathname() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_pathname(&temp_dir, "many", 20, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "many", 20, 1);
 
         assert!(result.is_ok(), "Should work with many attempts");
 
@@ -254,7 +254,7 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test with prefix containing hyphens and underscores
-        let result = create_unique_temp_pathname(&temp_dir, "my-app_v2", 5, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "my-app_v2", 5, 1);
 
         assert!(result.is_ok(), "Should handle prefix with special chars");
 
@@ -281,7 +281,7 @@ mod pathname_tests {
 
                 for file_num in 0..2 {
                     let prefix = format!("concurrent_t{}_f{}", thread_num, file_num);
-                    let result = create_unique_temp_pathname(&temp_dir_clone, &prefix, 10, 5);
+                    let result = create_unique_temp_filepath_name_pathbuf(&temp_dir_clone, &prefix, 10, 5);
 
                     assert!(result.is_ok(), "Should generate pathname from thread");
                     created_paths.push(result.unwrap());
@@ -319,7 +319,7 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test zero attempts error
-        let result = create_unique_temp_pathname(&temp_dir, "test", 0, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "test", 0, 1);
         if let Err(e) = result {
             assert!(format!("{}", e).contains("CUTP"), "Error should have CUTP prefix");
         }
@@ -332,7 +332,7 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Generate a pathname
-        let result = create_unique_temp_pathname(&temp_dir, "race", 5, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "race", 5, 1);
         assert!(result.is_ok(), "Should generate pathname");
         let path = result.unwrap();
 
@@ -345,7 +345,7 @@ mod pathname_tests {
         // Now the path exists, but our function returned it as "free"
         assert!(path.exists(), "Path now exists - RACE CONDITION occurred!");
 
-        // This demonstrates why you should use create_unique_temp_filepathbuf
+        // This demonstrates why you should use create_unique_temp_name_and_file_filepathbuf
         // for actual file creation instead of this name-only function
 
         // Cleanup
@@ -381,7 +381,7 @@ mod pathname_tests {
         }
 
         // Now try to generate a pathname - should succeed with retry logic
-        let result = create_unique_temp_pathname(&temp_dir, "retry", 10, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "retry", 10, 1);
 
         // Should still succeed (finds a unique name eventually)
         assert!(result.is_ok(), "Should succeed despite some names being taken");
@@ -409,7 +409,7 @@ mod pathname_tests {
 
         // Use only 1 attempt and hope for collision (unlikely but tests the error path)
         // In practice, this will usually succeed, so we just verify it handles the parameter
-        let result = create_unique_temp_pathname(&temp_dir, "exhaust", 1, 0);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "exhaust", 1, 0);
 
         // Should either succeed (most likely) or fail with proper error
         match result {
@@ -433,7 +433,7 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Step 1: Generate pathname
-        let result = create_unique_temp_pathname(&temp_dir, "usage", 5, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "usage", 5, 1);
         assert!(result.is_ok(), "Should generate pathname");
         let path = result.unwrap();
 
@@ -454,13 +454,13 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Generate pathname only
-        let pathname_result = create_unique_temp_pathname(&temp_dir, "compare_name", 5, 1);
+        let pathname_result = create_unique_temp_filepath_name_pathbuf(&temp_dir, "compare_name", 5, 1);
         assert!(pathname_result.is_ok());
         let pathname = pathname_result.unwrap();
         assert!(!pathname.exists(), "Name-only function: file does NOT exist");
 
         // Create file atomically
-        let file_result = create_unique_temp_filepathbuf(&temp_dir, "compare_file", 5, 1);
+        let file_result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "compare_file", 5, 1);
         assert!(file_result.is_ok());
         let filepath = file_result.unwrap();
         assert!(filepath.exists(), "File-creation function: file DOES exist");
@@ -479,7 +479,7 @@ mod pathname_tests {
     fn test_nonexistent_directory_pathname() {
         let bad_path = Path::new("/this/path/definitely/does/not/exist/nowhere/12345");
 
-        let result = create_unique_temp_pathname(bad_path, "test", 3, 1);
+        let result = create_unique_temp_filepath_name_pathbuf(bad_path, "test", 3, 1);
 
         // Function should succeed (just generates a name), even if directory doesn't exist
         // The error would only occur when actually trying to create the file
@@ -496,7 +496,7 @@ mod pathname_tests {
         let temp_dir = std::env::temp_dir();
 
         // CORRECT usage: when you need to pass pathname to external tool
-        let pathname = create_unique_temp_pathname(&temp_dir, "external", 5, 1)
+        let pathname = create_unique_temp_filepath_name_pathbuf(&temp_dir, "external", 5, 1)
             .expect("Should generate pathname");
 
         // Example: passing to external command (simulated)
@@ -504,11 +504,11 @@ mod pathname_tests {
         assert!(command_line.contains("external"), "Pathname used in command");
 
         // INCORRECT usage for direct file creation (race condition):
-        // let path = create_unique_temp_pathname(...)?;  // ❌ TOCTOU race!
+        // let path = create_unique_temp_filepath_name_pathbuf(...)?;  // ❌ TOCTOU race!
         // let file = File::create(&path)?;                // Another process could create it first
         
         // CORRECT usage for direct file creation:
-        // let path = create_unique_temp_filepathbuf(...)?;  // ✅ Atomic creation
+        // let path = create_unique_temp_name_and_file_filepathbuf(...)?;  // ✅ Atomic creation
         // // File already exists, safe to use
         
         println!("Generated pathname: {:?}", pathname);
@@ -581,7 +581,7 @@ mod pathname_tests {
 /// let base = Path::new("/tmp");
 ///
 /// // Standard usage
-/// match create_unique_temp_filepathbuf(base, "myapp", 5, 1) {
+/// match create_unique_temp_name_and_file_filepathbuf(base, "myapp", 5, 1) {
 ///     Ok(path) => {
 ///         println!("Created: {:?}", path);
 ///         // Use the file...
@@ -595,7 +595,7 @@ mod pathname_tests {
 /// }
 ///
 /// // High-contention scenario
-/// match create_unique_temp_filepathbuf(base, "distributed", 10, 10) {
+/// match create_unique_temp_name_and_file_filepathbuf(base, "distributed", 10, 10) {
 ///     Ok(path) => { /* use file */ },
 ///     Err(e) => { /* handle gracefully */ }
 /// }
@@ -612,7 +612,7 @@ mod pathname_tests {
 /// - Maximum possible delay: `number_of_attempts * retry_delay_ms`
 /// - Nanosecond timestamp provides ~1 billion unique values per second per thread
 /// - Thread ID formatting allocates small string (unavoidable with std::thread API)
-pub fn create_unique_temp_filepathbuf(
+pub fn create_unique_temp_name_and_file_filepathbuf(
     base_path: &Path,
     prefix: &str,
     number_of_attempts: u32,
@@ -743,7 +743,7 @@ mod tempname_tests {
     fn test_create_temp_file_basic() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "test", 5, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "test", 5, 1);
 
         assert!(result.is_ok(), "Should successfully create temp file");
 
@@ -763,7 +763,7 @@ mod tempname_tests {
 
         // Create 5 temp files in rapid succession
         for _ in 0..5 {
-            let result = create_unique_temp_filepathbuf(&temp_dir, "multi", 5, 1);
+            let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "multi", 5, 1);
             assert!(result.is_ok(), "Should create file");
             paths.push(result.unwrap());
         }
@@ -791,7 +791,7 @@ mod tempname_tests {
     fn test_nonexistent_directory() {
         let bad_path = Path::new("/this/path/definitely/does/not/exist/nowhere/12345");
 
-        let result = create_unique_temp_filepathbuf(bad_path, "test", 3, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(bad_path, "test", 3, 1);
 
         assert!(result.is_err(), "Should fail for non-existent directory");
     }
@@ -801,7 +801,7 @@ mod tempname_tests {
     fn test_filename_format() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "prefix", 5, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "prefix", 5, 1);
         assert!(result.is_ok(), "Should create file");
 
         let path = result.unwrap();
@@ -825,7 +825,7 @@ mod tempname_tests {
     fn test_zero_attempts() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "zero", 0, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "zero", 0, 1);
 
         assert!(result.is_err(), "Should fail with zero attempts");
 
@@ -844,7 +844,7 @@ mod tempname_tests {
     fn test_single_attempt() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "single", 1, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "single", 1, 1);
 
         assert!(result.is_ok(), "Should succeed with single attempt in low contention");
 
@@ -860,14 +860,14 @@ mod tempname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test with zero delay
-        let result1 = create_unique_temp_filepathbuf(&temp_dir, "delay0", 3, 0);
+        let result1 = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "delay0", 3, 0);
         assert!(result1.is_ok(), "Should work with zero delay");
         if let Ok(path) = result1 {
             let _ = fs::remove_file(path);
         }
 
         // Test with larger delay
-        let result2 = create_unique_temp_filepathbuf(&temp_dir, "delay100", 3, 100);
+        let result2 = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "delay100", 3, 100);
         assert!(result2.is_ok(), "Should work with 100ms delay");
         if let Ok(path) = result2 {
             let _ = fs::remove_file(path);
@@ -879,7 +879,7 @@ mod tempname_tests {
     fn test_many_attempts() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "many", 20, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "many", 20, 1);
 
         assert!(result.is_ok(), "Should work with many attempts");
 
@@ -895,7 +895,7 @@ mod tempname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test with prefix containing hyphens and underscores
-        let result = create_unique_temp_filepathbuf(&temp_dir, "my-app_v2", 5, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "my-app_v2", 5, 1);
 
         assert!(result.is_ok(), "Should handle prefix with special chars");
 
@@ -911,7 +911,7 @@ mod tempname_tests {
     fn test_file_is_writable() {
         let temp_dir = std::env::temp_dir();
 
-        let result = create_unique_temp_filepathbuf(&temp_dir, "writable", 5, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "writable", 5, 1);
         assert!(result.is_ok(), "Should create file");
 
         let path = result.unwrap();
@@ -944,7 +944,7 @@ mod tempname_tests {
 
                 for file_num in 0..2 {
                     let prefix = format!("concurrent_t{}_f{}", thread_num, file_num);
-                    let result = create_unique_temp_filepathbuf(&temp_dir_clone, &prefix, 10, 5);
+                    let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir_clone, &prefix, 10, 5);
 
                     assert!(result.is_ok(), "Should create file from thread");
                     created_paths.push(result.unwrap());
@@ -987,7 +987,7 @@ mod tempname_tests {
         let temp_dir = std::env::temp_dir();
 
         // Test zero attempts error
-        let result = create_unique_temp_filepathbuf(&temp_dir, "test", 0, 1);
+        let result = create_unique_temp_name_and_file_filepathbuf(&temp_dir, "test", 0, 1);
         if let Err(e) = result {
             assert!(format!("{}", e).contains("CUTF"), "Error should have CUTF prefix");
         }
