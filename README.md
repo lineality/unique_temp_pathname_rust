@@ -2,7 +2,123 @@
 
 # Make name only
 ```rust
+/// Generates a unique temporary filename in the specified base directory with configurable retry logic.
+///
+/// **IMPORTANT**: This function only generates a pathname and verifies it doesn't exist.
+/// It does NOT create the file, so there's a TOCTOU (Time-Of-Check-Time-Of-Use) race condition
+/// where another process could create the file between checking and your usage.
+///
+/// # Project Context
+/// This function generates a temporary file name for scenarios where you need the name
+/// before creating the file (e.g., passing to external tools, database registration).
+/// Use `create_unique_temp_filepathbuf` instead if you need atomic file creation.
+///
+/// # Implementation Strategy
+/// - Uses process ID, thread ID, and nanosecond timestamp for uniqueness
+/// - Checks file doesn't exist (non-atomic - subject to race conditions)
+/// - Retries up to `number_of_attempts` times with configurable delay
+/// - Different timestamps on each retry provide additional uniqueness
+///
+/// # Arguments
+/// * `base_path` - The directory where the temporary file would be created (must exist)
+/// * `prefix` - A prefix for the filename to identify the file's purpose
+/// * `number_of_attempts` - Maximum number of attempts (recommended: 3-10)
+/// * `retry_delay_ms` - Milliseconds to wait between retry attempts (recommended: 1-100)
+///
+/// # Returns
+/// * `Ok(PathBuf)` - Path that didn't exist at check time (NOT guaranteed to still be free)
+/// * `Err(io::Error)` - If unique name generation fails after all attempts
+///
+/// # Security Warning
+/// This function has an inherent race condition. Another process can create the file
+/// between when this function checks and when you use the path. For atomic creation,
+/// use `create_unique_temp_filepathbuf` instead.
+pub fn create_unique_temp_pathname(
+    base_path: &Path,
+    prefix: &str,
+    number_of_attempts: u32,
+    retry_delay_ms: u64,
+) -> Result<PathBuf, io::Error> {
+    use std::process;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+    use std::io;
 
+    // Validate number_of_attempts is non-zero
+    if number_of_attempts == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "CUTP: number_of_attempts must be greater than zero",
+        ));
+    }
+
+    // Get process ID once (constant for this process)
+    let pid = process::id();
+
+    // Get thread ID and format it for filename use
+    let thread_id = thread::current().id();
+    let thread_id_string = format!("{:?}", thread_id);
+
+    // Clean thread ID: remove "ThreadId(" prefix and ")" suffix
+    let thread_id_clean = thread_id_string
+        .trim_start_matches("ThreadId(")
+        .trim_end_matches(')');
+
+    // Attempt to generate unique name with retry logic
+    for attempt in 0..number_of_attempts {
+        // Get current timestamp with nanosecond precision
+        let timestamp_result = SystemTime::now().duration_since(UNIX_EPOCH);
+
+        let timestamp_nanos = match timestamp_result {
+            Ok(duration) => duration.as_nanos(),
+            Err(_) => {
+                // System time error (e.g., clock moved backwards)
+                if attempt == number_of_attempts - 1 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "CUTP: system time unavailable",
+                    ));
+                }
+                // Try again with next attempt
+                thread::sleep(Duration::from_millis(retry_delay_ms));
+                continue;
+            }
+        };
+
+        // Construct filename: prefix_pid_threadid_timestamp.tmp
+        let filename = format!(
+            "{}_{}_{}_{}.tmp",
+            prefix, pid, thread_id_clean, timestamp_nanos
+        );
+
+        // Build absolute path
+        let file_path = base_path.join(&filename);
+
+        // Check if file exists (RACE CONDITION HERE)
+        if !file_path.exists() {
+            // Path doesn't exist at this moment
+            // WARNING: It could be created by another process immediately after this check
+            return Ok(file_path);
+        }
+
+        // File already exists, check if we've exhausted retries
+        if attempt == number_of_attempts - 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "CUTP: max retry attempts exceeded",
+            ));
+        }
+
+        // Wait briefly before retry
+        thread::sleep(Duration::from_millis(retry_delay_ms));
+    }
+
+    // Should be unreachable due to loop logic
+    Err(io::Error::new(
+        io::ErrorKind::Other,
+        "CUTP: unexpected loop exit",
+    ))
+}
 ```
 
 # Make file and name 
