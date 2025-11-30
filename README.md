@@ -119,6 +119,402 @@ pub fn create_unique_temp_pathname(
         "CUTP: unexpected loop exit",
     ))
 }
+
+#[cfg(test)]
+mod pathname_tests {
+    use super::*;
+    use std::fs;
+    use std::thread;
+
+    /// Test basic functionality: can we generate a temp pathname with standard parameters?
+    #[test]
+    fn test_create_temp_pathname_basic() {
+        let temp_dir = std::env::temp_dir();
+
+        let result = create_unique_temp_pathname(&temp_dir, "test", 5, 1);
+
+        assert!(result.is_ok(), "Should successfully generate temp pathname");
+
+        let path = result.unwrap();
+        assert!(path.starts_with(&temp_dir), "Path should be in temp directory");
+        assert!(!path.exists(), "Path should not exist yet (we didn't create it)");
+    }
+
+    /// Test that multiple pathnames generated rapidly are unique
+    #[test]
+    fn test_create_multiple_unique_pathnames() {
+        let temp_dir = std::env::temp_dir();
+        let mut paths = Vec::new();
+
+        // Generate 5 temp pathnames in rapid succession
+        for _ in 0..5 {
+            let result = create_unique_temp_pathname(&temp_dir, "multi", 5, 1);
+            assert!(result.is_ok(), "Should generate pathname");
+            paths.push(result.unwrap());
+        }
+
+        // Verify all paths are unique
+        for i in 0..paths.len() {
+            for j in (i + 1)..paths.len() {
+                assert_ne!(paths[i], paths[j], "Paths should be unique");
+            }
+        }
+
+        // Verify no files were created
+        for path in &paths {
+            assert!(!path.exists(), "File should NOT exist (name-only function)");
+        }
+    }
+
+    /// Test filename format contains expected components
+    #[test]
+    fn test_pathname_format() {
+        let temp_dir = std::env::temp_dir();
+
+        let result = create_unique_temp_pathname(&temp_dir, "prefix", 5, 1);
+        assert!(result.is_ok(), "Should generate pathname");
+
+        let path = result.unwrap();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+
+        // Verify filename contains prefix
+        assert!(filename.starts_with("prefix_"), "Filename should start with prefix");
+
+        // Verify filename ends with .tmp
+        assert!(filename.ends_with(".tmp"), "Filename should end with .tmp");
+
+        // Verify filename contains underscores (pid_threadid_timestamp structure)
+        assert!(filename.matches('_').count() >= 3, "Filename should have at least 3 underscores");
+    }
+
+    /// Test with zero attempts parameter (should return error immediately)
+    #[test]
+    fn test_zero_attempts_pathname() {
+        let temp_dir = std::env::temp_dir();
+
+        let result = create_unique_temp_pathname(&temp_dir, "zero", 0, 1);
+
+        assert!(result.is_err(), "Should fail with zero attempts");
+
+        if let Err(e) = result {
+            let error_msg = format!("{}", e);
+            assert!(error_msg.contains("CUTP"), "Error should have CUTP prefix");
+            assert!(
+                error_msg.contains("greater than zero") || error_msg.contains("number_of_attempts"),
+                "Error should mention invalid attempt count"
+            );
+        }
+    }
+
+    /// Test with single attempt (should work in low-contention)
+    #[test]
+    fn test_single_attempt_pathname() {
+        let temp_dir = std::env::temp_dir();
+
+        let result = create_unique_temp_pathname(&temp_dir, "single", 1, 1);
+
+        assert!(result.is_ok(), "Should succeed with single attempt in low contention");
+
+        if let Ok(path) = result {
+            assert!(!path.exists(), "Path should not exist");
+        }
+    }
+
+    /// Test with different delay values (ensures parameter is used)
+    #[test]
+    fn test_different_delays_pathname() {
+        let temp_dir = std::env::temp_dir();
+
+        // Test with zero delay
+        let result1 = create_unique_temp_pathname(&temp_dir, "delay0", 3, 0);
+        assert!(result1.is_ok(), "Should work with zero delay");
+
+        // Test with larger delay
+        let result2 = create_unique_temp_pathname(&temp_dir, "delay100", 3, 100);
+        assert!(result2.is_ok(), "Should work with 100ms delay");
+    }
+
+    /// Test with high number of attempts
+    #[test]
+    fn test_many_attempts_pathname() {
+        let temp_dir = std::env::temp_dir();
+
+        let result = create_unique_temp_pathname(&temp_dir, "many", 20, 1);
+
+        assert!(result.is_ok(), "Should work with many attempts");
+
+        if let Ok(path) = result {
+            assert!(!path.exists(), "Path should not exist");
+        }
+    }
+
+    /// Test prefix with special characters (edge case)
+    #[test]
+    fn test_prefix_with_special_chars_pathname() {
+        let temp_dir = std::env::temp_dir();
+
+        // Test with prefix containing hyphens and underscores
+        let result = create_unique_temp_pathname(&temp_dir, "my-app_v2", 5, 1);
+
+        assert!(result.is_ok(), "Should handle prefix with special chars");
+
+        if let Ok(path) = result {
+            let filename = path.file_name().unwrap().to_str().unwrap();
+            assert!(filename.starts_with("my-app_v2_"), "Filename should preserve prefix");
+        }
+    }
+
+    /// Test concurrent generation from multiple threads
+    #[test]
+    fn test_concurrent_pathname_generation() {
+        use std::sync::Arc;
+
+        let temp_dir = Arc::new(std::env::temp_dir());
+        let mut handles = vec![];
+
+        // Spawn 5 threads that each generate 2 pathnames
+        for thread_num in 0..5 {
+            let temp_dir_clone = Arc::clone(&temp_dir);
+
+            let handle = thread::spawn(move || {
+                let mut created_paths = Vec::new();
+
+                for file_num in 0..2 {
+                    let prefix = format!("concurrent_t{}_f{}", thread_num, file_num);
+                    let result = create_unique_temp_pathname(&temp_dir_clone, &prefix, 10, 5);
+
+                    assert!(result.is_ok(), "Should generate pathname from thread");
+                    created_paths.push(result.unwrap());
+                }
+
+                created_paths
+            });
+
+            handles.push(handle);
+        }
+
+        // Collect all generated paths
+        let mut all_paths = Vec::new();
+        for handle in handles {
+            let paths = handle.join().expect("Thread should complete");
+            all_paths.extend(paths);
+        }
+
+        // Verify all paths are unique
+        for i in 0..all_paths.len() {
+            for j in (i + 1)..all_paths.len() {
+                assert_ne!(all_paths[i], all_paths[j], "All paths from all threads should be unique");
+            }
+        }
+
+        // Verify no files were created
+        for path in &all_paths {
+            assert!(!path.exists(), "No files should be created by pathname-only function");
+        }
+    }
+
+    /// Test error message format for debugging
+    #[test]
+    fn test_error_messages_have_cutp_prefix() {
+        let temp_dir = std::env::temp_dir();
+
+        // Test zero attempts error
+        let result = create_unique_temp_pathname(&temp_dir, "test", 0, 1);
+        if let Err(e) = result {
+            assert!(format!("{}", e).contains("CUTP"), "Error should have CUTP prefix");
+        }
+    }
+
+    /// **CRITICAL TEST**: Demonstrates the race condition vulnerability
+    /// This test shows that the name-only function is NOT safe for actual file creation
+    #[test]
+    fn test_race_condition_vulnerability() {
+        let temp_dir = std::env::temp_dir();
+
+        // Generate a pathname
+        let result = create_unique_temp_pathname(&temp_dir, "race", 5, 1);
+        assert!(result.is_ok(), "Should generate pathname");
+        let path = result.unwrap();
+
+        // At this point, the path doesn't exist
+        assert!(!path.exists(), "Path should not exist initially");
+
+        // Simulate another process creating the file
+        fs::File::create(&path).expect("Should be able to create file");
+
+        // Now the path exists, but our function returned it as "free"
+        assert!(path.exists(), "Path now exists - RACE CONDITION occurred!");
+
+        // This demonstrates why you should use create_unique_temp_filepathbuf
+        // for actual file creation instead of this name-only function
+
+        // Cleanup
+        let _ = fs::remove_file(path);
+    }
+
+    /// Test that function handles retry when file gets created between attempts
+    #[test]
+    fn test_retry_when_file_appears() {
+        let temp_dir = std::env::temp_dir();
+
+        // Pre-create files that might conflict
+        let pid = std::process::id();
+        let thread_id = thread::current().id();
+        let thread_id_string = format!("{:?}", thread_id);
+        let thread_id_clean = thread_id_string
+            .trim_start_matches("ThreadId(")
+            .trim_end_matches(')');
+
+        // Create a few files with likely timestamp values
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let mut created_files = Vec::new();
+        for offset in 0..3 {
+            let filename = format!("retry_{}_{}_{}_{}.tmp", "retry", pid, thread_id_clean, now + offset);
+            let path = temp_dir.join(&filename);
+            if let Ok(_) = fs::File::create(&path) {
+                created_files.push(path);
+            }
+        }
+
+        // Now try to generate a pathname - should succeed with retry logic
+        let result = create_unique_temp_pathname(&temp_dir, "retry", 10, 1);
+
+        // Should still succeed (finds a unique name eventually)
+        assert!(result.is_ok(), "Should succeed despite some names being taken");
+
+        if let Ok(path) = result {
+            assert!(!path.exists(), "Generated path should not exist");
+            
+            // Verify it's different from our pre-created files
+            for existing in &created_files {
+                assert_ne!(path, *existing, "Should generate different name than existing files");
+            }
+        }
+
+        // Cleanup
+        for path in created_files {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    /// Test exhausting retries (force collision scenario)
+    #[test]
+    fn test_exhausted_retries_pathname() {
+        // This test is difficult to guarantee failure, but we can demonstrate the error path
+        let temp_dir = std::env::temp_dir();
+
+        // Use only 1 attempt and hope for collision (unlikely but tests the error path)
+        // In practice, this will usually succeed, so we just verify it handles the parameter
+        let result = create_unique_temp_pathname(&temp_dir, "exhaust", 1, 0);
+
+        // Should either succeed (most likely) or fail with proper error
+        match result {
+            Ok(path) => {
+                assert!(!path.exists(), "If succeeded, path should not exist");
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                assert!(
+                    error_msg.contains("CUTP") || error_msg.contains("max retry"),
+                    "Error should indicate retry exhaustion"
+                );
+            }
+        }
+    }
+
+    /// Test that we can use the pathname to actually create a file afterwards
+    /// (Demonstrates intended usage pattern)
+    #[test]
+    fn test_pathname_can_be_used_for_creation() {
+        let temp_dir = std::env::temp_dir();
+
+        // Step 1: Generate pathname
+        let result = create_unique_temp_pathname(&temp_dir, "usage", 5, 1);
+        assert!(result.is_ok(), "Should generate pathname");
+        let path = result.unwrap();
+
+        // Step 2: Use the pathname to create file (user's responsibility)
+        let create_result = fs::File::create(&path);
+        assert!(create_result.is_ok(), "Should be able to create file at generated path");
+
+        // Step 3: Verify file exists
+        assert!(path.exists(), "File should now exist");
+
+        // Cleanup
+        let _ = fs::remove_file(path);
+    }
+
+    /// Comparison test: demonstrate difference between name-only and file-creation functions
+    #[test]
+    fn test_comparison_pathname_vs_file_creation() {
+        let temp_dir = std::env::temp_dir();
+
+        // Generate pathname only
+        let pathname_result = create_unique_temp_pathname(&temp_dir, "compare_name", 5, 1);
+        assert!(pathname_result.is_ok());
+        let pathname = pathname_result.unwrap();
+        assert!(!pathname.exists(), "Name-only function: file does NOT exist");
+
+        // Create file atomically
+        let file_result = create_unique_temp_filepathbuf(&temp_dir, "compare_file", 5, 1);
+        assert!(file_result.is_ok());
+        let filepath = file_result.unwrap();
+        assert!(filepath.exists(), "File-creation function: file DOES exist");
+
+        // Key difference demonstrated:
+        // - pathname: you get a name, you create the file (race condition risk)
+        // - filepath: you get a name AND the file is already created (atomic, safe)
+
+        // Cleanup
+        let _ = fs::remove_file(filepath);
+        // Note: pathname doesn't need cleanup because file was never created
+    }
+
+    /// Test for non-existent base directory (should handle gracefully)
+    #[test]
+    fn test_nonexistent_directory_pathname() {
+        let bad_path = Path::new("/this/path/definitely/does/not/exist/nowhere/12345");
+
+        let result = create_unique_temp_pathname(bad_path, "test", 3, 1);
+
+        // Function should succeed (just generates a name), even if directory doesn't exist
+        // The error would only occur when actually trying to create the file
+        assert!(result.is_ok(), "Should generate pathname even for non-existent directory");
+        
+        if let Ok(path) = result {
+            assert!(!path.exists(), "Path in non-existent directory obviously doesn't exist");
+        }
+    }
+
+    /// Documentation test: Show the intended use case and warning
+    #[test]
+    fn test_documented_usage_pattern() {
+        let temp_dir = std::env::temp_dir();
+
+        // CORRECT usage: when you need to pass pathname to external tool
+        let pathname = create_unique_temp_pathname(&temp_dir, "external", 5, 1)
+            .expect("Should generate pathname");
+
+        // Example: passing to external command (simulated)
+        let command_line = format!("some_tool --output {:?}", pathname);
+        assert!(command_line.contains("external"), "Pathname used in command");
+
+        // INCORRECT usage for direct file creation (race condition):
+        // let path = create_unique_temp_pathname(...)?;  // ❌ TOCTOU race!
+        // let file = File::create(&path)?;                // Another process could create it first
+        
+        // CORRECT usage for direct file creation:
+        // let path = create_unique_temp_filepathbuf(...)?;  // ✅ Atomic creation
+        // // File already exists, safe to use
+        
+        println!("Generated pathname: {:?}", pathname);
+        println!("Use this with external tools or where atomic creation isn't needed");
+    }
+}
 ```
 
 # Make file and name 
